@@ -1,153 +1,142 @@
 #include <arpa/inet.h>
-#include <semaphore.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 #include <iostream>
-#include <thread>
 
 using namespace std;
 
-/*
-get_port
-send_ready(sender, receiver)
-relay(sender, receiver)
-terminate(sender, receiver)
-
+/** Constants
+ * BUF_SIZE : TCP payload size
 */
-sem_t m;
+const static int BUF_SIZE = 1 << 16;
+
+/** Global variables
+ * int sender_sockfd : sender connection socket
+ * int receiver_sockfd : receiver connection socket 
+ * char sender_ready_message[25] : sender READY message 
+ * char receiver_ready_message[27] : receiver READY message
+*/
 int sender_sockfd = -1;
 int receiver_sockfd = -1;
-bool wait_flag = 1;
-char buffer[BUFSIZ];
-char* sender_ready_message = "READY: You are a sender.";
-char* receiver_ready_message = "READY: You are a receiver.";
+char sender_ready_message[25] = "READY: You are a sender.";
+char receiver_ready_message[27] = "READY: You are a receiver.";
 
 void usage() {
-  printf("syntax : echo-server <port> [-e[-b]]\n");
-  printf("\t-e : echo\n");
-  printf("\t-b : broadcast\n");
-  printf("sample : echo-server 1234 -e -b\n");
-  return;
+  printf("syntax : relay-server <port>\n");
+  printf("sample : relay-server 1234\n");
+  exit(EXIT_FAILURE);
 }
 
-void* sender_thread(void* sockfd, void* buffer, void* wait_flag) {
-  int sender_sockfd = *(int*)sockfd;
-  char* buf = (char*)buffer;
-  while (*(bool*)wait_flag) continue;
-  ssize_t response_len, sent_len;
-  sent_len = send(sender_sockfd, sender_ready_message, strlen(sender_ready_message), 0);
-  if (sent_len == 0 || sent_len == -1) {
-    perror("Failed to send Sender READY Message");
-  }
-  while (true) {
-    //? Receive message
-    response_len = recv(sender_sockfd, buf, BUFSIZ - 1, 0);
-    if (response_len == 0 || response_len == -1) {
-      perror("Failed to receive");
-      break;
-    }
-    buf[response_len] = '\0';
-  }
-  //* Remove client
-  close(sender_sockfd);
-  printf("Sender(%d) disconnected\n", sender_sockfd);
-  return nullptr;
-}
-
-void* receiver_thread(void* sockfd, void* buffer) {
+int send_mes(int sockfd, char* message) {
   ssize_t sent_len;
-  sent_len = send(receiver_sockfd, receiver_ready_message, strlen(receiver_ready_message), 0);
-  if (sent_len == 0 || sent_len == -1) {
-    perror("Failed to send Receiver READY Message");
+  sent_len = send(sockfd, message, strlen(message), 0);
+  if (sent_len <= 0) {
+    perror("[-] Failed to a send message");
+    return -1;
   }
-  int receiver_sockfd = *(int*)sockfd;
-  char* buf = (char*)buffer;
-  sent_len = send(receiver_sockfd, buf, strlen(buf), 0);
-  if (sent_len == 0 || sent_len == -1) {
-    perror("Failed to send");
+  return sent_len;
+}
+
+int relay_mes(int sender_sockfd, int receiver_sockfd) {
+  // Receive a user's message from sender
+  char buf[BUF_SIZE];
+  memset(buf, 0, sizeof(buf));
+  ssize_t received_len = recv(sender_sockfd, buf, BUF_SIZE - 1, 0);
+  buf[received_len] = '\0';
+  // Send a user's message to receiver
+  int res = send_mes(receiver_sockfd, buf);
+  if (res < 0) {
+    perror("[-] Failed to a send a user's message to receiver");
+    return -1;
   }
-  //* Remove client
-  close(receiver_sockfd);
-  printf("Receiver(%d) disconnected\n", receiver_sockfd);
-  return nullptr;
+  return res;
 }
 
 int main(int argc, char* argv[]) {
-  if (argc < 2) {
-    usage();
-    return -1;
-  }
+  // For error detection
+  int res;
 
-  int res;  //* for error check
+  // Check arguments - syntax : relay-server <port>
+  if (argc != 2) usage();
 
-  //* Get port number
+  // Get a port number from argumetn
   int port = atoi(argv[1]);
-
-  //* Create a socket
-  int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-  if (sockfd == -1) {
-    perror("Failed to create a socket");
-    return -1;
+  if (port < 0 || (int)(1 << 16) <= port) {
+    perror("[-] Invalid port number");
+    exit(EXIT_FAILURE);
   }
 
-  //* Set socket options
-  //   int optval = 1;
-  //   res = setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
-  //   if (res == -1) {
-  //     perror("Failed to set socket options");
-  //     return -1;
-  //   }
+  // Create a welcome socket
+  // IPv4 Internet protocols and TCP
+  int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+  if (sockfd < 0) {
+    perror("[-] Failed to create a socket");
+    exit(EXIT_FAILURE);
+  }
 
-  //* Build a socket address
+  // Build a socket address
   struct sockaddr_in addr;
   addr.sin_family = AF_INET;
   addr.sin_port = htons(port);
   addr.sin_addr.s_addr = htonl(INADDR_ANY);
   memset(addr.sin_zero, 0, sizeof(addr.sin_zero));
 
-  //* Bind
+  // Bind
   res = bind(sockfd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(struct sockaddr));
-  if (res == -1) {
-    perror("Failed to bind");
-    return -1;
+  if (res < 0) {
+    perror("[-] Failed to bind");
+    exit(EXIT_FAILURE);
   }
 
-  //* Listen
+  // Listen
   res = listen(sockfd, SOMAXCONN);
-  if (res == -1) {
-    perror("Failed to listen");
-    return -1;
+  if (res < 0) {
+    perror("[-] Failed to listen");
+    exit(EXIT_FAILURE);
   }
 
   while (true) {
     struct sockaddr_in client_addr;
     socklen_t client_len = sizeof(client_addr);
     int client_sockfd = accept(sockfd, reinterpret_cast<struct sockaddr*>(&client_addr), &client_len);
-    if (client_sockfd == -1) {
-      perror("Failed to accept");
+    if (client_sockfd < 0) {
+      perror("[-] Failed to accept");
       break;
     }
-    printf("[+] Client connected\n");
+    printf("[+] Client(%d) connected\n", client_sockfd);
 
-    //? Sender setting
+    // There is no sender connection
     if (sender_sockfd == -1) {
       sender_sockfd = client_sockfd;
-      thread sender_t(sender_thread, reinterpret_cast<void*>(&sender_sockfd), reinterpret_cast<void*>(buffer), reinterpret_cast<void*>(&wait_flag));
-      sender_t.detach();
     }
-
-    //? Receiver setting
-    if (receiver_sockfd == -1) {
+    // There is no receiver connection
+    else if (receiver_sockfd == -1) {
       receiver_sockfd = client_sockfd;
-      wait_flag = 0;
-      thread receiver_t(receiver_thread, reinterpret_cast<void*>(&receiver_sockfd), reinterpret_cast<void*>(buffer));
-      receiver_t.detach();
+      res = send_mes(sender_sockfd, sender_ready_message);
+      if (res < 0) {
+        perror("[-] Failed to send a sender READY message");
+        break;
+      }
+      res = send_mes(receiver_sockfd, receiver_ready_message);
+      if (res < 0) {
+        perror("[-] Failed to send a receiver READY message");
+        break;
+      }
+      res = relay_mes(sender_sockfd, receiver_sockfd);
+      if (res < 0) {
+        perror("[-] Failed to relay a user's message");
+        break;
+      }
+      break;
     }
   }
-
+  // Close welcome socket
   close(sockfd);
-  sem_destroy(&m);
+  // Close sender connection socket
+  if (sender_sockfd != -1) close(sender_sockfd);
+  // Close receiver connection socket
+  if (receiver_sockfd != -1) close(receiver_sockfd);
   return 0;
 }
