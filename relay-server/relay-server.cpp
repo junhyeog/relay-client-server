@@ -129,6 +129,7 @@ int main(int argc, char* argv[]) {
         perror("[-] Failed to relay a user's message");
         break;
       }
+      printf("[+] a message relayed\n");
       break;
     }
   }
