@@ -30,7 +30,7 @@ char user_mes[BUF_SIZE];
 char relayed_mes[BUF_SIZE];
 
 void usage() {
-  printf("syntax : relay-client <ip> <port>\n");
+  printf("syntax : relay-client <IP address> <port number>\n");
   printf("sample : relay-client 192.168.10.2 1234\n");
   exit(EXIT_FAILURE);
 }
@@ -112,7 +112,7 @@ int main(int argc, char *argv[]) {
 
   // Receiver: receive a relayed message
   if (receiver_flag) {
-    ssize_t received_len = recv(sockfd, relayed_mes, BUFSIZ - 1, 0);
+    ssize_t received_len = recv(sockfd, relayed_mes, BUF_SIZE - 1, 0);
     relayed_mes[received_len] = '\0';
     close(sockfd);
     if (received_len <= 0) {

@@ -24,7 +24,7 @@ char sender_ready_message[25] = "READY: You are a sender.";
 char receiver_ready_message[27] = "READY: You are a receiver.";
 
 void usage() {
-  printf("syntax : relay-server <port>\n");
+  printf("syntax : relay-server <port number>\n");
   printf("sample : relay-server 1234\n");
   exit(EXIT_FAILURE);
 }
@@ -45,6 +45,10 @@ int relay_mes(int sender_sockfd, int receiver_sockfd) {
   memset(buf, 0, sizeof(buf));
   ssize_t received_len = recv(sender_sockfd, buf, BUF_SIZE - 1, 0);
   buf[received_len] = '\0';
+  if (received_len <= 0) {
+    perror("[-] Failed to recieve a relay message");
+    return -1;
+  }
   // Send a user's message to receiver
   int res = send_mes(receiver_sockfd, buf);
   if (res < 0) {
@@ -58,7 +62,7 @@ int main(int argc, char* argv[]) {
   // For error detection
   int res;
 
-  // Check arguments - syntax : relay-server <port>
+  // Check arguments - syntax : relay-server <port number>
   if (argc != 2) usage();
 
   // Get a port number from argumetn
@@ -87,6 +91,7 @@ int main(int argc, char* argv[]) {
   res = bind(sockfd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(struct sockaddr));
   if (res < 0) {
     perror("[-] Failed to bind");
+    close(sockfd);
     exit(EXIT_FAILURE);
   }
 
@@ -94,6 +99,7 @@ int main(int argc, char* argv[]) {
   res = listen(sockfd, SOMAXCONN);
   if (res < 0) {
     perror("[-] Failed to listen");
+    close(sockfd);
     exit(EXIT_FAILURE);
   }
 
